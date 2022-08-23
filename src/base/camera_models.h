@@ -126,7 +126,8 @@ static const int kInvalidCameraModelId = -1;
   CAMERA_MODEL_CASE(OpenCVFisheyeCameraModel)       \
   CAMERA_MODEL_CASE(FullOpenCVCameraModel)          \
   CAMERA_MODEL_CASE(FOVCameraModel)                 \
-  CAMERA_MODEL_CASE(ThinPrismFisheyeCameraModel)
+  CAMERA_MODEL_CASE(ThinPrismFisheyeCameraModel)    \
+  CAMERA_MODEL_CASE(SphericalCentralCameraModel)
 #endif
 
 #ifndef CAMERA_MODEL_SWITCH_CASES
@@ -347,6 +348,17 @@ struct RadialFisheyeCameraModel
 struct ThinPrismFisheyeCameraModel
     : public BaseCameraModel<ThinPrismFisheyeCameraModel> {
   CAMERA_MODEL_DEFINITIONS(10, "THIN_PRISM_FISHEYE", 12)
+};
+
+// Spherical camera model.
+//
+// Parameter list is expected in the following order:
+//
+//    f, cx, cy
+//
+struct SphericalCentralCameraModel
+    : public BaseCameraModel<SphericalCentralCameraModel> {
+  CAMERA_MODEL_DEFINITIONS(11, "SPHERICAL_CENTRAL", 3)
 };
 
 // Check whether camera model with given name or identifier exists.
@@ -1477,6 +1489,57 @@ void ThinPrismFisheyeCameraModel::Distortion(const T* extra_params, const T u,
   const T radial = k1 * r2 + k2 * r4 + k3 * r6 + k4 * r8;
   *du = u * radial + T(2) * p1 * uv + p2 * (r2 + T(2) * u2) + sx1 * r2;
   *dv = v * radial + T(2) * p2 * uv + p1 * (r2 + T(2) * v2) + sy1 * r2;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// SphericalCentralCameraModel
+
+std::string SphericalCentralCameraModel::InitializeParamsInfo() {
+  return "f, cx, cy";
+}
+
+std::vector<size_t> SphericalCentralCameraModel::InitializeFocalLengthIdxs() {
+  return {0};
+}
+
+std::vector<size_t> SphericalCentralCameraModel::InitializePrincipalPointIdxs() {
+  return {1, 2};
+}
+
+std::vector<size_t> SphericalCentralCameraModel::InitializeExtraParamsIdxs() {
+  return {};
+}
+
+std::vector<double> SphericalCentralCameraModel::InitializeParams(
+    const double focal_length, const size_t width, const size_t height) {
+  return {focal_length, width / 2.0, height / 2.0};
+}
+
+template <typename T>
+void SphericalCentralCameraModel::WorldToImage(const T* params, const T u,
+                                               const T v, T* x, T* y) {
+  const T f = params[0];
+  const T c1 = params[1];
+  const T c2 = params[2];
+
+  T l = ceres::sqrt(u * u + v * v + 1.0);
+  T u_ = u / l, v_ = v / l, w = 1.0 / l;
+  T p = ceres::atan2(u_, w), t = -ceres::asin(v_);
+
+  *x = p * f + c1;
+  *y = -t * f + c2;
+}
+
+template <typename T>
+void SphericalCentralCameraModel::ImageToWorld(const T* params, const T x,
+                                               const T y, T* u, T* v) {
+  const T f = params[0];
+  const T c1 = params[1];
+  const T c2 = params[2];
+
+  auto p = (x - c1) / f, t = -(y - c2) / f;
+  *u = ceres::tan(p);
+  *v = -ceres::tan(t) / ceres::cos(p);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
